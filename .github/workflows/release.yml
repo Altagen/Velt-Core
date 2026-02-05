@@ -1,0 +1,322 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ===========================================
+  # Build & Verify
+  # ===========================================
+  build:
+    name: 🔨 Build & Verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security audit
+        run: npm audit --audit-level=high || true
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack npm package
+        run: npm pack
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: "*.tgz"
+          retention-days: 30
+
+  # ===========================================
+  # Generate SBOM for Release
+  # ===========================================
+  sbom:
+    name: 📋 Generate SBOM
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom-${{ needs.build.outputs.version }}.json
+          npx @cyclonedx/cyclonedx-npm --output-format XML --output-file sbom-${{ needs.build.outputs.version }}.xml
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-release
+          path: sbom-*
+          retention-days: 90
+
+  # ===========================================
+  # Generate Checksums
+  # ===========================================
+  checksums:
+    name: 🔐 Generate Checksums
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+
+      - name: Generate checksums
+        run: |
+          echo "# Checksums for @altagen/velt-core v${{ needs.build.outputs.version }}" > checksums.txt
+          echo "" >> checksums.txt
+          echo "## SHA256" >> checksums.txt
+          echo '```' >> checksums.txt
+          sha256sum *.tgz >> checksums.txt
+          echo '```' >> checksums.txt
+          echo "" >> checksums.txt
+          echo "## SHA512" >> checksums.txt
+          echo '```' >> checksums.txt
+          sha512sum *.tgz >> checksums.txt
+          echo '```' >> checksums.txt
+
+          # Also create individual checksum files
+          sha256sum *.tgz > SHA256SUMS.txt
+          sha512sum *.tgz > SHA512SUMS.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: |
+            checksums.txt
+            SHA256SUMS.txt
+            SHA512SUMS.txt
+          retention-days: 90
+
+  # ===========================================
+  # Generate Release Notes
+  # ===========================================
+  release-notes:
+    name: 📝 Generate Release Notes
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: prev_tag
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.build.outputs.version }}"
+          PREV_TAG="${{ steps.prev_tag.outputs.tag }}"
+          REPO="${{ github.repository }}"
+
+          # Start building the changelog
+          {
+            echo "## 🚀 Release v${VERSION}"
+            echo ""
+            echo "### 📦 Installation"
+            echo '```bash'
+            echo "npm install @altagen/velt-core@${VERSION}"
+            echo '```'
+            echo ""
+          } > release_notes.md
+
+          # Get commits since last tag (or all commits if no previous tag)
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"%H|%s" --no-merges)
+          else
+            COMMITS=$(git log --pretty=format:"%H|%s" --no-merges)
+          fi
+
+          # Initialize sections
+          FEAT=""
+          FIX=""
+          DOCS=""
+          STYLE=""
+          REFACTOR=""
+          PERF=""
+          TEST=""
+          BUILD=""
+          CI=""
+          CHORE=""
+          SECURITY=""
+          BREAKING=""
+          OTHER=""
+
+          # Parse commits
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+
+            HASH=$(echo "$line" | cut -d'|' -f1)
+            MSG=$(echo "$line" | cut -d'|' -f2-)
+            SHORT_HASH="${HASH:0:7}"
+            LINK="https://github.com/${REPO}/commit/${HASH}"
+
+            # Check for breaking changes
+            if echo "$MSG" | grep -qi "BREAKING CHANGE\|!:"; then
+              BREAKING="${BREAKING}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n'
+            fi
+
+            # Categorize by type
+            case "$MSG" in
+              feat:*|feat\(*) FEAT="${FEAT}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              fix:*|fix\(*) FIX="${FIX}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              docs:*|docs\(*) DOCS="${DOCS}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              style:*|style\(*) STYLE="${STYLE}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              refactor:*|refactor\(*) REFACTOR="${REFACTOR}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              perf:*|perf\(*) PERF="${PERF}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              test:*|test\(*) TEST="${TEST}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              build:*|build\(*) BUILD="${BUILD}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              ci:*|ci\(*) CI="${CI}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              chore:*|chore\(*) CHORE="${CHORE}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              security:*|security\(*) SECURITY="${SECURITY}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+              *) OTHER="${OTHER}- [\`${SHORT_HASH}\`](${LINK}) ${MSG}"$'\n' ;;
+            esac
+          done <<< "$COMMITS"
+
+          # Add sections to release notes
+          [ -n "$BREAKING" ] && { echo "### 💥 Breaking Changes"; echo "$BREAKING"; } >> release_notes.md
+          [ -n "$FEAT" ] && { echo "### ✨ New Features"; echo "$FEAT"; } >> release_notes.md
+          [ -n "$FIX" ] && { echo "### 🐛 Bug Fixes"; echo "$FIX"; } >> release_notes.md
+          [ -n "$SECURITY" ] && { echo "### 🔒 Security"; echo "$SECURITY"; } >> release_notes.md
+          [ -n "$PERF" ] && { echo "### ⚡ Performance"; echo "$PERF"; } >> release_notes.md
+          [ -n "$REFACTOR" ] && { echo "### ♻️ Refactoring"; echo "$REFACTOR"; } >> release_notes.md
+          [ -n "$DOCS" ] && { echo "### 📝 Documentation"; echo "$DOCS"; } >> release_notes.md
+          [ -n "$STYLE" ] && { echo "### 💄 Style"; echo "$STYLE"; } >> release_notes.md
+          [ -n "$TEST" ] && { echo "### ✅ Tests"; echo "$TEST"; } >> release_notes.md
+          [ -n "$BUILD" ] && { echo "### 📦 Build"; echo "$BUILD"; } >> release_notes.md
+          [ -n "$CI" ] && { echo "### 👷 CI/CD"; echo "$CI"; } >> release_notes.md
+          [ -n "$CHORE" ] && { echo "### 🔧 Maintenance"; echo "$CHORE"; } >> release_notes.md
+          [ -n "$OTHER" ] && { echo "### 📌 Other"; echo "$OTHER"; } >> release_notes.md
+
+          # Add footer
+          {
+            echo "---"
+            echo ""
+            echo "### 🔐 Security"
+            echo ""
+            echo "- SBOM (Software Bill of Materials) attached"
+            echo "- SHA256/SHA512 checksums attached"
+            echo ""
+            echo "### 📊 Verification"
+            echo ""
+            echo 'Verify package integrity:'
+            echo '```bash'
+            echo "npm pack @altagen/velt-core@${VERSION}"
+            echo "sha256sum altagen-velt-core-${VERSION}.tgz"
+            echo '```'
+          } >> release_notes.md
+
+          # Output for GitHub Actions
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          cat release_notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release_notes.md
+          retention-days: 30
+
+  # ===========================================
+  # Create GitHub Release
+  # ===========================================
+  github-release:
+    name: 🎉 Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, checksums, release-notes, sbom]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ needs.build.outputs.version }}"
+          body: ${{ needs.release-notes.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(needs.build.outputs.version, '-') }}
+          files: |
+            artifacts/npm-package/*.tgz
+            artifacts/checksums/*.txt
+            artifacts/sbom-release/*
+          generate_release_notes: false
+
+  # ===========================================
+  # Publish to npm
+  # ===========================================
+  npm-publish:
+    name: 📤 Publish to npm
+    runs-on: ubuntu-latest
+    needs: [build, github-release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

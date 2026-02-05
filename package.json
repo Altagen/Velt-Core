@@ -1,0 +1,87 @@
+{
+  "name": "@altagen/velt-core",
+  "version": "0.1.0",
+  "description": "Core editor components for Velt - A modern, minimal code editor built on CodeMirror 6",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "husky || true",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "editor",
+    "code-editor",
+    "codemirror",
+    "codemirror6",
+    "text-editor",
+    "syntax-highlighting",
+    "typescript",
+    "react",
+    "svelte",
+    "vue"
+  ],
+  "author": "Altagen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Altagen/Velt-Core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Altagen/Velt-Core/issues"
+  },
+  "homepage": "https://github.com/Altagen/Velt-Core#readme",
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-cpp": "^6.0.3",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.9",
+    "@codemirror/lang-java": "^6.0.2",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/lang-php": "^6.0.2",
+    "@codemirror/lang-python": "^6.1.6",
+    "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/search": "^6.5.8",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.35.3",
+    "codemirror": "^6.0.1"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "husky": "^9.1.7",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@codemirror/state": {
+      "optional": false
+    },
+    "@codemirror/view": {
+      "optional": false
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
