@@ -1,0 +1,175 @@
+name: Security Scan
+
+on:
+  schedule:
+    # Run every Monday at 9:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ===========================================
+  # Full Security Audit
+  # ===========================================
+  audit:
+    name: 🔒 Full Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: |
+          echo "## 🔒 npm Audit Report" > audit-report.md
+          echo "" >> audit-report.md
+          echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> audit-report.md
+          echo "" >> audit-report.md
+          npm audit --json > audit.json || true
+
+          # Parse and format audit results
+          VULNERABILITIES=$(cat audit.json | jq '.metadata.vulnerabilities')
+          CRITICAL=$(echo $VULNERABILITIES | jq '.critical')
+          HIGH=$(echo $VULNERABILITIES | jq '.high')
+          MODERATE=$(echo $VULNERABILITIES | jq '.moderate')
+          LOW=$(echo $VULNERABILITIES | jq '.low')
+
+          echo "### Summary" >> audit-report.md
+          echo "" >> audit-report.md
+          echo "| Severity | Count |" >> audit-report.md
+          echo "|----------|-------|" >> audit-report.md
+          echo "| 🔴 Critical | $CRITICAL |" >> audit-report.md
+          echo "| 🟠 High | $HIGH |" >> audit-report.md
+          echo "| 🟡 Moderate | $MODERATE |" >> audit-report.md
+          echo "| 🟢 Low | $LOW |" >> audit-report.md
+          echo "" >> audit-report.md
+
+          if [ "$CRITICAL" != "0" ] || [ "$HIGH" != "0" ]; then
+            echo "### ⚠️ Action Required" >> audit-report.md
+            echo "" >> audit-report.md
+            echo "Critical or high severity vulnerabilities detected. Please review and update dependencies." >> audit-report.md
+          fi
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-${{ github.run_id }}
+          path: |
+            audit-report.md
+            audit.json
+          retention-days: 90
+
+  # ===========================================
+  # CodeQL Deep Scan
+  # ===========================================
+  codeql:
+    name: 🛡️ CodeQL Deep Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+          upload: true
+
+  # ===========================================
+  # License Compliance Check
+  # ===========================================
+  license-check:
+    name: 📜 License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check licenses
+        run: |
+          npx license-checker --summary --out licenses.txt
+          npx license-checker --json --out licenses.json
+
+          echo "## 📜 License Report" > license-report.md
+          echo "" >> license-report.md
+          echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> license-report.md
+          echo "" >> license-report.md
+          echo '```' >> license-report.md
+          cat licenses.txt >> license-report.md
+          echo '```' >> license-report.md
+
+      - name: Check for problematic licenses
+        run: |
+          # Check for GPL, AGPL which may have copyleft implications
+          if npx license-checker --failOn "GPL-3.0;AGPL-3.0;GPL-2.0" 2>/dev/null; then
+            echo "✅ No problematic licenses found"
+          else
+            echo "⚠️ Warning: Potentially problematic licenses detected"
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report-${{ github.run_id }}
+          path: |
+            license-report.md
+            licenses.json
+            licenses.txt
+          retention-days: 90
+
+  # ===========================================
+  # SBOM Generation (Weekly)
+  # ===========================================
+  sbom:
+    name: 📋 Weekly SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate SBOM
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom-${DATE}.json
+          npx @cyclonedx/cyclonedx-npm --output-format XML --output-file sbom-${DATE}.xml
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-weekly-${{ github.run_id }}
+          path: sbom-*
+          retention-days: 90
