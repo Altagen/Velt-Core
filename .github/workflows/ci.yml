@@ -150,7 +150,7 @@ jobs:
           retention-days: 90
 
       - name: Submit SBOM to Dependency Graph
-        uses: advanced-security/spdx-dependency-submission-action@v0.1.1
+        uses: advanced-security/spdx-dependency-submission-action@v0.1.2
         continue-on-error: true
         with:
           filePath: "sbom.json"
