@@ -1,7 +1,7 @@
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Panel, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
 import { EditorState, Extension, Compartment, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { search, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext as cmFindNext, findPrevious as cmFindPrevious, replaceNext, replaceAll as cmReplaceAll, getSearchQuery } from '@codemirror/search';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
 import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
@@ -229,6 +229,7 @@ export class VeltEditor {
           ...foldKeymap,
           ...completionKeymap,
           ...lintKeymap,
+          indentWithTab,
         ]),
         search(), // Enable search functionality (for findNext/findPrevious commands)
         customSearchHighlight, // Custom search highlighting for ALL matches
@@ -253,7 +254,7 @@ export class VeltEditor {
 
     // Load language async (fire-and-forget)
     if (this.currentLanguage) {
-      this.setLanguage(this.currentLanguage);
+      this.setLanguage(this.currentLanguage).catch(() => {});
     }
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "@altagen/velt-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Core editor components for Velt - A modern, minimal code editor built on CodeMirror 6",
   "type": "module",
   "main": "./dist/index.js",
