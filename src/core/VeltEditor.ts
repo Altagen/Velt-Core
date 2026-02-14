@@ -232,7 +232,7 @@ export class VeltEditor {
         ]),
         search(), // Enable search functionality (for findNext/findPrevious commands)
         customSearchHighlight, // Custom search highlighting for ALL matches
-        this.languageCompartment.of(getLanguageExtension(this.currentLanguage)),
+        this.languageCompartment.of([]),
         this.wordWrapCompartment.of(options.wordWrap ? EditorView.lineWrapping : []),
         this.showInvisiblesCompartment.of(options.showInvisibles ? highlightWhitespace() : []),
         this.tabSizeCompartment.of(EditorState.tabSize.of(options.tabSize || 2)),
@@ -250,6 +250,11 @@ export class VeltEditor {
       state,
       parent: this.container,
     });
+
+    // Load language async (fire-and-forget)
+    if (this.currentLanguage) {
+      this.setLanguage(this.currentLanguage);
+    }
   }
 
   /**
@@ -436,10 +441,11 @@ export class VeltEditor {
   /**
    * Set the language for syntax highlighting
    */
-  setLanguage(language: string): void {
+  async setLanguage(language: string): Promise<void> {
     this.currentLanguage = language;
+    const ext = await getLanguageExtension(language);
     this.view.dispatch({
-      effects: this.languageCompartment.reconfigure(getLanguageExtension(language)),
+      effects: this.languageCompartment.reconfigure(ext),
     });
   }
 
