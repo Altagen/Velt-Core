@@ -93,6 +93,7 @@ export interface VeltEditorOptions {
   tabSize?: number;
   wordWrap?: boolean;
   showInvisibles?: boolean;
+  autoIndent?: boolean;
 }
 
 export interface TabData {

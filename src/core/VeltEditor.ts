@@ -1,9 +1,9 @@
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Panel, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
-import { EditorState, Extension, Compartment, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
+import { EditorState, Extension, Compartment, Prec, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { search, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext as cmFindNext, findPrevious as cmFindPrevious, replaceNext, replaceAll as cmReplaceAll, getSearchQuery } from '@codemirror/search';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore, insertNewlineAndIndent } from '@codemirror/commands';
 import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
-import { closeBrackets, autocompletion, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
 import { getLanguageExtension } from '../config/languages';
 import type { VeltEditorOptions, Theme } from '../types';
@@ -180,8 +180,11 @@ export class VeltEditor {
   private showInvisiblesCompartment = new Compartment();
   private tabSizeCompartment = new Compartment();
   private gutterCompartment = new Compartment();
+  private indentOnInputCompartment = new Compartment();
   private currentFontSize = 14;
   private currentFontFamily = 'Consolas, Monaco, "Courier New", monospace';
+  private nativeShiftTabHandler?: () => void;
+  private autoIndentEnabled = true;
 
   constructor(options: VeltEditorOptions) {
     this.container = options.container;
@@ -194,6 +197,49 @@ export class VeltEditor {
     const state = EditorState.create({
       doc: options.content || '',
       extensions: [
+        // Highest priority keymap: Tab, Shift+Tab, Enter
+        // Placed here to guarantee they work regardless of other extensions
+        Prec.highest(keymap.of([
+          {
+            key: 'Tab',
+            run: (view) => {
+              if (view.state.selection.ranges.some(r => !r.empty)) {
+                indentMore(view);
+              } else {
+                const tabSize = view.state.facet(EditorState.tabSize);
+                view.dispatch(view.state.replaceSelection(' '.repeat(tabSize)));
+              }
+              return true;
+            },
+            shift: (view) => {
+              if (!view.state.selection.main.empty) {
+                return indentLess(view);
+              }
+              const tabSize = view.state.facet(EditorState.tabSize);
+              const cursor = view.state.selection.main.head;
+              const line = view.state.doc.lineAt(cursor);
+              const before = line.text.slice(0, cursor - line.from);
+              const trailingSpaces = before.length - before.trimEnd().length;
+              const spacesToRemove = Math.min(tabSize, trailingSpaces);
+              if (spacesToRemove > 0) {
+                view.dispatch({
+                  changes: { from: cursor - spacesToRemove, to: cursor },
+                });
+              }
+              return true;
+            },
+          },
+          {
+            key: 'Enter',
+            run: (view) => {
+              if (this.autoIndentEnabled) {
+                return insertNewlineAndIndent(view);
+              }
+              view.dispatch(view.state.replaceSelection(view.state.lineBreak));
+              return true;
+            },
+          },
+        ])),
         // basicSetup WITHOUT drawSelection - we'll use native browser selection
         this.gutterCompartment.of([
           lineNumbers(),
@@ -204,35 +250,33 @@ export class VeltEditor {
         bookmarkState,
         highlightSpecialChars(),
         history(),
-        // drawSelection(), // REMOVED - use native selection
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
+        this.indentOnInputCompartment.of(options.autoIndent !== false ? [
+          indentOnInput(),
+        ] : []),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
-        closeBrackets(),
-        autocompletion(),
+        // closeBrackets() removed: its inputHandler has a bug at column 2
+        // that prevents Enter from working. bracketMatching() still highlights pairs.
+        autocompletion({ activateOnTyping: false }),
         rectangularSelection(),
         crosshairCursor(),
         highlightActiveLine(),
         highlightSelectionMatches(),
-        // Note: searchKeymap is intentionally NOT included here - we use custom Find & Replace panel
-        // The search() extension provides search functionality without the default panel
         keymap.of([
-          ...closeBracketsKeymap,
+          // closeBracketsKeymap removed (closeBrackets disabled)
           ...defaultKeymap.filter(kb => {
-            // Filter out Ctrl+F and Ctrl+H from default keymap to prevent default search panel
             const key = kb.key;
-            return key !== 'Mod-f' && key !== 'Mod-h';
+            return key !== 'Mod-f' && key !== 'Mod-h' && key !== 'Enter';
           }),
           ...historyKeymap,
           ...foldKeymap,
-          ...completionKeymap,
+          ...completionKeymap.filter(kb => kb.key !== 'Enter'),
           ...lintKeymap,
-          indentWithTab,
         ]),
-        search(), // Enable search functionality (for findNext/findPrevious commands)
-        customSearchHighlight, // Custom search highlighting for ALL matches
+        search(),
+        customSearchHighlight,
         this.languageCompartment.of([]),
         this.wordWrapCompartment.of(options.wordWrap ? EditorView.lineWrapping : []),
         this.showInvisiblesCompartment.of(options.showInvisibles ? highlightWhitespace() : []),
@@ -251,6 +295,31 @@ export class VeltEditor {
       state,
       parent: this.container,
     });
+
+    // Listen for native Shift+Tab event from Tauri/GTK (Linux workaround).
+    // On Linux, GTK translates Shift+Tab to ISO_Left_Tab which WebKitGTK
+    // intercepts before JS. Tauri catches it at the GTK level and dispatches
+    // this custom event instead.
+    const editorView = this.view;
+    this.nativeShiftTabHandler = () => {
+      if (!editorView.hasFocus) return;
+      const tabSize = editorView.state.facet(EditorState.tabSize);
+      if (!editorView.state.selection.main.empty) {
+        indentLess(editorView);
+      } else {
+        const cursor = editorView.state.selection.main.head;
+        const line = editorView.state.doc.lineAt(cursor);
+        const before = line.text.slice(0, cursor - line.from);
+        const trailingSpaces = before.length - before.trimEnd().length;
+        const spacesToRemove = Math.min(tabSize, trailingSpaces);
+        if (spacesToRemove > 0) {
+          editorView.dispatch({
+            changes: { from: cursor - spacesToRemove, to: cursor },
+          });
+        }
+      }
+    };
+    window.addEventListener('native-shift-tab', this.nativeShiftTabHandler);
 
     // Load language async (fire-and-forget)
     if (this.currentLanguage) {
@@ -479,6 +548,9 @@ export class VeltEditor {
    * Destroy the editor instance
    */
   destroy(): void {
+    if (this.nativeShiftTabHandler) {
+      window.removeEventListener('native-shift-tab', this.nativeShiftTabHandler);
+    }
     this.view.destroy();
   }
 
@@ -1655,6 +1727,18 @@ export class VeltEditor {
   setShowInvisibles(enabled: boolean): void {
     this.view.dispatch({
       effects: this.showInvisiblesCompartment.reconfigure(enabled ? highlightWhitespace() : [])
+    });
+  }
+
+  /**
+   * Enable or disable auto-indentation on input
+   */
+  setAutoIndent(enabled: boolean): void {
+    this.autoIndentEnabled = enabled;
+    this.view.dispatch({
+      effects: this.indentOnInputCompartment.reconfigure(enabled ? [
+        indentOnInput(),
+      ] : [])
     });
   }
 
