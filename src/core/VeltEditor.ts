@@ -1,9 +1,9 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Panel, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Panel, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
 import { EditorState, Extension, Compartment, Prec, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { search, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext as cmFindNext, findPrevious as cmFindPrevious, replaceNext, replaceAll as cmReplaceAll, getSearchQuery } from '@codemirror/search';
-import { defaultKeymap, history, historyKeymap, indentLess, indentMore, insertNewlineAndIndent } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
-import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
 import { getLanguageExtension } from '../config/languages';
 import type { VeltEditorOptions, Theme } from '../types';
@@ -181,10 +181,11 @@ export class VeltEditor {
   private tabSizeCompartment = new Compartment();
   private gutterCompartment = new Compartment();
   private indentOnInputCompartment = new Compartment();
+  private autoIndentCompartment = new Compartment();
   private currentFontSize = 14;
   private currentFontFamily = 'Consolas, Monaco, "Courier New", monospace';
   private nativeShiftTabHandler?: () => void;
-  private autoIndentEnabled = true;
+  private onCursorChangeCallback?: () => void;
 
   constructor(options: VeltEditorOptions) {
     this.container = options.container;
@@ -197,18 +198,19 @@ export class VeltEditor {
     const state = EditorState.create({
       doc: options.content || '',
       extensions: [
-        // Highest priority keymap: Tab, Shift+Tab, Enter
-        // Placed here to guarantee they work regardless of other extensions
+        // Tab: insert spaces (avoids <span class="cm-tab"> rendering overhead in WebKitGTK)
+        // Shift+Tab: custom handler to remove spaces before cursor
         Prec.highest(keymap.of([
           {
             key: 'Tab',
             run: (view) => {
-              if (view.state.selection.ranges.some(r => !r.empty)) {
-                indentMore(view);
-              } else {
-                const tabSize = view.state.facet(EditorState.tabSize);
-                view.dispatch(view.state.replaceSelection(' '.repeat(tabSize)));
-              }
+              if (view.state.selection.ranges.some(r => !r.empty))
+                return indentMore(view);
+              const tabSize = view.state.facet(EditorState.tabSize);
+              view.dispatch(view.state.update(
+                view.state.replaceSelection(' '.repeat(tabSize)),
+                {scrollIntoView: true, userEvent: "input"}
+              ));
               return true;
             },
             shift: (view) => {
@@ -229,18 +231,18 @@ export class VeltEditor {
               return true;
             },
           },
-          {
+        ])),
+        // Auto-indent toggle: when OFF, override Enter with plain newline
+        this.autoIndentCompartment.of(options.autoIndent === false ? [
+          Prec.high(keymap.of([{
             key: 'Enter',
             run: (view) => {
-              if (this.autoIndentEnabled) {
-                return insertNewlineAndIndent(view);
-              }
               view.dispatch(view.state.replaceSelection(view.state.lineBreak));
               return true;
             },
-          },
-        ])),
-        // basicSetup WITHOUT drawSelection - we'll use native browser selection
+          }])),
+        ] : []),
+        // Gutter, bookmarks, and basic editor features
         this.gutterCompartment.of([
           lineNumbers(),
           highlightActiveLineGutter(),
@@ -250,6 +252,7 @@ export class VeltEditor {
         bookmarkState,
         highlightSpecialChars(),
         history(),
+        drawSelection({ cursorBlinkRate: 530 }),
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         this.indentOnInputCompartment.of(options.autoIndent !== false ? [
@@ -257,19 +260,15 @@ export class VeltEditor {
         ] : []),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         bracketMatching(),
-        // closeBrackets() removed: its inputHandler has a bug at column 2
-        // that prevents Enter from working. bracketMatching() still highlights pairs.
-        autocompletion({ activateOnTyping: false }),
+        closeBrackets(),
+        autocompletion(),
         rectangularSelection(),
         crosshairCursor(),
         highlightActiveLine(),
         highlightSelectionMatches(),
         keymap.of([
-          // closeBracketsKeymap removed (closeBrackets disabled)
-          ...defaultKeymap.filter(kb => {
-            const key = kb.key;
-            return key !== 'Mod-f' && key !== 'Mod-h' && key !== 'Enter';
-          }),
+          ...closeBracketsKeymap,
+          ...defaultKeymap.filter(kb => kb.key !== 'Mod-f' && kb.key !== 'Mod-h'),
           ...historyKeymap,
           ...foldKeymap,
           ...completionKeymap.filter(kb => kb.key !== 'Enter'),
@@ -284,6 +283,9 @@ export class VeltEditor {
         EditorView.updateListener.of((update) => {
           if (update.docChanged && this.onChangeCallback) {
             this.onChangeCallback(update.state.doc.toString());
+          }
+          if ((update.docChanged || update.selectionSet) && this.onCursorChangeCallback) {
+            this.onCursorChangeCallback();
           }
         }),
         EditorView.editable.of(true),
@@ -367,19 +369,18 @@ export class VeltEditor {
           paddingRight: '12px',
         },
         '.cm-activeLine': {
-          backgroundColor: '#2d2d30 !important',
+          backgroundColor: 'rgba(45, 45, 48, 0.5)',
         },
-        '.cm-line.cm-activeLine': {
-          backgroundColor: '#2d2d30 !important',
+        // Bring drawSelection layer above line backgrounds so selection is always visible
+        '& .cm-selectionLayer': {
+          zIndex: '1 !important',
         },
-        // Native browser selection - keep text visible
-        '& ::selection': {
-          backgroundColor: 'rgba(58, 110, 165, 0.3) !important',
-          color: '#d4d4d4 !important',
+        '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+          backgroundColor: 'rgba(58, 110, 165, 0.4) !important',
         },
-        '& ::-moz-selection': {
-          backgroundColor: 'rgba(58, 110, 165, 0.3) !important',
-          color: '#d4d4d4 !important',
+        // Hide native selection (drawSelection handles it)
+        '& .cm-content ::selection': {
+          backgroundColor: 'transparent !important',
         },
         // Search match highlighting
         '& .cm-searchMatch': {
@@ -443,19 +444,18 @@ export class VeltEditor {
         paddingRight: '12px',
       },
       '.cm-activeLine': {
-        backgroundColor: `${theme.editor.lineHighlight} !important`,
+        backgroundColor: theme.editor.lineHighlight,
       },
-      '.cm-line.cm-activeLine': {
-        backgroundColor: `${theme.editor.lineHighlight} !important`,
+      // Bring drawSelection layer above line backgrounds so selection is always visible
+      '& .cm-selectionLayer': {
+        zIndex: '1 !important',
       },
-      // Native browser selection - keep text visible
-      '& ::selection': {
+      '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
         backgroundColor: `${theme.editor.selection} !important`,
-        color: `${theme.editor.foreground} !important`,
       },
-      '& ::-moz-selection': {
-        backgroundColor: `${theme.editor.selection} !important`,
-        color: `${theme.editor.foreground} !important`,
+      // Hide native selection (drawSelection handles it)
+      '& .cm-content ::selection': {
+        backgroundColor: 'transparent !important',
       },
       // Search match highlighting - all matches
       '& .cm-searchMatch': {
@@ -949,9 +949,7 @@ export class VeltEditor {
    * Register a callback for cursor/selection changes
    */
   onCursorChange(callback: () => void): void {
-    // Store the callback for potential cleanup later
-    this.view.dom.addEventListener('mouseup', callback);
-    this.view.dom.addEventListener('keyup', callback);
+    this.onCursorChangeCallback = callback;
   }
 
   /**
@@ -1734,11 +1732,19 @@ export class VeltEditor {
    * Enable or disable auto-indentation on input
    */
   setAutoIndent(enabled: boolean): void {
-    this.autoIndentEnabled = enabled;
     this.view.dispatch({
-      effects: this.indentOnInputCompartment.reconfigure(enabled ? [
-        indentOnInput(),
-      ] : [])
+      effects: [
+        this.indentOnInputCompartment.reconfigure(enabled ? [indentOnInput()] : []),
+        this.autoIndentCompartment.reconfigure(enabled ? [] : [
+          Prec.high(keymap.of([{
+            key: 'Enter',
+            run: (view) => {
+              view.dispatch(view.state.replaceSelection(view.state.lineBreak));
+              return true;
+            },
+          }])),
+        ]),
+      ]
     });
   }
 
