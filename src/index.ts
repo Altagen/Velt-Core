@@ -17,6 +17,12 @@ export type {
   Theme,
   VeltEditorOptions,
   TabData,
+  SyntaxTheme,
+  MarkdownPreviewTheme,
+  HeadingStyle,
+  CodeSyntaxTheme,
+  AdmonitionStyle,
+  AdmonitionsTheme,
 } from './types';
 
 // Utilities
