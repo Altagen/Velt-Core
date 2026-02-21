@@ -2,7 +2,8 @@ import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSp
 import { EditorState, Extension, Compartment, Prec, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { search, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext as cmFindNext, findPrevious as cmFindPrevious, replaceNext, replaceAll as cmReplaceAll, getSearchQuery } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
-import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap } from '@codemirror/language';
+import { foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldKeymap, HighlightStyle } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { lintKeymap } from '@codemirror/lint';
 import { getLanguageExtension } from '../config/languages';
@@ -182,6 +183,7 @@ export class VeltEditor {
   private gutterCompartment = new Compartment();
   private indentOnInputCompartment = new Compartment();
   private autoIndentCompartment = new Compartment();
+  private syntaxHighlightCompartment = new Compartment();
   private currentFontSize = 14;
   private currentFontFamily = 'Consolas, Monaco, "Courier New", monospace';
   private nativeShiftTabHandler?: () => void;
@@ -258,7 +260,7 @@ export class VeltEditor {
         this.indentOnInputCompartment.of(options.autoIndent !== false ? [
           indentOnInput(),
         ] : []),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        this.syntaxHighlightCompartment.of(this.createSyntaxHighlightStyle()),
         bracketMatching(),
         closeBrackets(),
         autocompletion(),
@@ -327,6 +329,45 @@ export class VeltEditor {
     if (this.currentLanguage) {
       this.setLanguage(this.currentLanguage).catch(() => {});
     }
+  }
+
+  /**
+   * Create syntax highlighting style from theme
+   */
+  private createSyntaxHighlightStyle(): Extension {
+    const s = this.currentTheme?.syntax;
+    if (!s) {
+      return syntaxHighlighting(defaultHighlightStyle, { fallback: true });
+    }
+
+    const specs: { tag: any; color: string }[] = [];
+
+    if (s.keyword) specs.push({ tag: tags.keyword, color: s.keyword });
+    if (s.string) specs.push({ tag: tags.string, color: s.string });
+    if (s.number) specs.push({ tag: tags.number, color: s.number });
+    if (s.comment) specs.push({ tag: tags.comment, color: s.comment });
+    if (s.function) specs.push({ tag: tags.function(tags.variableName), color: s.function });
+    if (s.variable) specs.push({ tag: tags.variableName, color: s.variable });
+    if (s.type) specs.push({ tag: tags.typeName, color: s.type });
+    if (s.operator) specs.push({ tag: tags.operator, color: s.operator });
+    if (s.punctuation) specs.push({ tag: tags.punctuation, color: s.punctuation });
+    if (s.attribute) specs.push({ tag: tags.attributeName, color: s.attribute });
+    if (s.tag) specs.push({ tag: tags.tagName, color: s.tag });
+    if (s.regexp) specs.push({ tag: tags.regexp, color: s.regexp });
+    if (s.builtin) specs.push({ tag: tags.standard(tags.variableName), color: s.builtin });
+    if (s.meta) specs.push({ tag: tags.meta, color: s.meta });
+    if (s.property) specs.push({ tag: tags.propertyName, color: s.property });
+    if (s.constant) specs.push({ tag: tags.constant(tags.variableName), color: s.constant });
+
+    if (specs.length === 0) {
+      return syntaxHighlighting(defaultHighlightStyle, { fallback: true });
+    }
+
+    const style = HighlightStyle.define(specs);
+    return [
+      syntaxHighlighting(style),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    ];
   }
 
   /**
@@ -526,7 +567,10 @@ export class VeltEditor {
     this.currentTheme = theme;
     const newTheme = this.createTheme();
     this.view.dispatch({
-      effects: this.themeCompartment.reconfigure(newTheme),
+      effects: [
+        this.themeCompartment.reconfigure(newTheme),
+        this.syntaxHighlightCompartment.reconfigure(this.createSyntaxHighlightStyle()),
+      ],
     });
   }
 
