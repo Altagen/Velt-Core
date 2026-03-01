@@ -18,10 +18,10 @@ jobs:
     name: 🔒 Full Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -52,16 +52,13 @@ jobs:
           echo "| 🟠 High | $HIGH |" >> audit-report.md
           echo "| 🟡 Moderate | $MODERATE |" >> audit-report.md
           echo "| 🟢 Low | $LOW |" >> audit-report.md
-          echo "" >> audit-report.md
 
           if [ "$CRITICAL" != "0" ] || [ "$HIGH" != "0" ]; then
-            echo "### ⚠️ Action Required" >> audit-report.md
-            echo "" >> audit-report.md
-            echo "Critical or high severity vulnerabilities detected. Please review and update dependencies." >> audit-report.md
+            echo "::warning::Found $CRITICAL critical and $HIGH high vulnerabilities"
           fi
 
       - name: Upload audit report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: security-audit-${{ github.run_id }}
           path: |
@@ -76,22 +73,21 @@ jobs:
     name: 🛡️ CodeQL Deep Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
           queries: security-extended,security-and-quality
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
+        uses: github/codeql-action/autobuild@v3
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v3
         with:
           category: "/language:javascript-typescript"
-          upload: true
 
   # ===========================================
   # License Compliance Check
@@ -100,10 +96,10 @@ jobs:
     name: 📜 License Compliance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -116,17 +112,8 @@ jobs:
           npx license-checker --summary --out licenses.txt
           npx license-checker --json --out licenses.json
 
-          echo "## 📜 License Report" > license-report.md
-          echo "" >> license-report.md
-          echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> license-report.md
-          echo "" >> license-report.md
-          echo '```' >> license-report.md
-          cat licenses.txt >> license-report.md
-          echo '```' >> license-report.md
-
       - name: Check for problematic licenses
         run: |
-          # Check for GPL, AGPL which may have copyleft implications
           if npx license-checker --failOn "GPL-3.0;AGPL-3.0;GPL-2.0" 2>/dev/null; then
             echo "✅ No problematic licenses found"
           else
@@ -134,11 +121,10 @@ jobs:
           fi
 
       - name: Upload license report
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: license-report-${{ github.run_id }}
           path: |
-            license-report.md
             licenses.json
             licenses.txt
           retention-days: 90
@@ -150,10 +136,10 @@ jobs:
     name: 📋 Weekly SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -168,7 +154,7 @@ jobs:
           npx @cyclonedx/cyclonedx-npm --output-format XML --output-file sbom-${DATE}.xml
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: sbom-weekly-${{ github.run_id }}
           path: sbom-*
