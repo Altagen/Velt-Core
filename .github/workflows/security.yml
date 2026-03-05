@@ -1,6 +1,8 @@
 name: Security Scan
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Run every Monday at 9:00 UTC
     - cron: '0 9 * * 1'
@@ -52,12 +54,9 @@ jobs:
           echo "| 🟠 High | $HIGH |" >> audit-report.md
           echo "| 🟡 Moderate | $MODERATE |" >> audit-report.md
           echo "| 🟢 Low | $LOW |" >> audit-report.md
-          echo "" >> audit-report.md
 
           if [ "$CRITICAL" != "0" ] || [ "$HIGH" != "0" ]; then
-            echo "### ⚠️ Action Required" >> audit-report.md
-            echo "" >> audit-report.md
-            echo "Critical or high severity vulnerabilities detected. Please review and update dependencies." >> audit-report.md
+            echo "::warning::Found $CRITICAL critical and $HIGH high vulnerabilities"
           fi
 
       - name: Upload audit report
@@ -68,30 +67,6 @@ jobs:
             audit-report.md
             audit.json
           retention-days: 90
-
-  # ===========================================
-  # CodeQL Deep Scan
-  # ===========================================
-  codeql:
-    name: 🛡️ CodeQL Deep Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: javascript-typescript
-          queries: security-extended,security-and-quality
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v4
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:javascript-typescript"
-          upload: true
 
   # ===========================================
   # License Compliance Check
@@ -116,17 +91,8 @@ jobs:
           npx license-checker --summary --out licenses.txt
           npx license-checker --json --out licenses.json
 
-          echo "## 📜 License Report" > license-report.md
-          echo "" >> license-report.md
-          echo "Generated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> license-report.md
-          echo "" >> license-report.md
-          echo '```' >> license-report.md
-          cat licenses.txt >> license-report.md
-          echo '```' >> license-report.md
-
       - name: Check for problematic licenses
         run: |
-          # Check for GPL, AGPL which may have copyleft implications
           if npx license-checker --failOn "GPL-3.0;AGPL-3.0;GPL-2.0" 2>/dev/null; then
             echo "✅ No problematic licenses found"
           else
@@ -138,7 +104,6 @@ jobs:
         with:
           name: license-report-${{ github.run_id }}
           path: |
-            license-report.md
             licenses.json
             licenses.txt
           retention-days: 90

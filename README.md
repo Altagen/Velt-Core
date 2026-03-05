@@ -1,14 +1,31 @@
-# Velt Core
+<h1 align="center">Velt Core</h1>
 
-Core editor components for building modern code editors. Built on [CodeMirror 6](https://codemirror.net/), Velt Core provides a high-level API for creating feature-rich text editors.
+<p align="center">
+  Core editor components for building modern code editors.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Altagen/Velt-Core/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Altagen/Velt-Core/ci.yml?label=CI" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/@altagen/velt-core"><img src="https://img.shields.io/npm/v/@altagen/velt-core" alt="npm version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
+</p>
+
+Built on [CodeMirror 6](https://codemirror.net/), Velt Core provides a high-level API for creating feature-rich text editors that work with any JavaScript framework.
 
 ## Features
 
-- **VeltEditor** - A fully-featured code editor with syntax highlighting, search/replace, bookmarks, and more
-- **TabManager** - Tab management system for multi-file editing
-- **Theme Support** - Customizable themes with editor, gutter, UI, and icon color configuration
-- **Language Support** - Built-in syntax highlighting for JavaScript, TypeScript, Python, Rust, HTML, CSS, JSON, and more
-- **Framework Agnostic** - Works with React, Svelte, Vue, or vanilla JavaScript
+- **VeltEditor** — Fully-featured code editor with syntax highlighting, search/replace, bookmarks, and more
+- **TabManager** — Tab management system for multi-file editing
+- **Theme Support** — Customizable themes with editor, gutter, UI, and icon color configuration
+- **Language Support** — Built-in syntax highlighting for JavaScript, TypeScript, Python, Rust, HTML, CSS, JSON, and more
+- **Framework Agnostic** — Works with React, Svelte, Vue, or vanilla JavaScript
+
+## Tech Stack
+
+- **Language**: TypeScript
+- **Core**: CodeMirror 6
+- **Bundler**: Vite
+- **Package**: npm (`@altagen/velt-core`)
 
 ## Installation
 
@@ -82,7 +99,6 @@ import { TabManager } from '@altagen/velt-core';
 
 const tabManager = new TabManager();
 
-// Add a new tab
 const tabId = tabManager.addTab({
   filePath: '/path/to/file.ts',
   content: 'const x = 1;',
@@ -92,7 +108,6 @@ const tabId = tabManager.addTab({
   language: 'typescript'
 });
 
-// Subscribe to changes
 tabManager.subscribe((tabs, activeId) => {
   console.log('Tabs updated:', tabs);
 });
@@ -148,18 +163,11 @@ const languages = getSupportedLanguages();
 ### Utilities
 
 ```typescript
-import { debounce, throttle, generateId, formatFileSize, getFileName } from '@altagen/velt-core';
+import { debounce, generateId, formatFileSize, getFileName } from '@altagen/velt-core';
 
-// Debounce function calls
 const debouncedSave = debounce(save, 300);
-
-// Generate unique IDs
 const id = generateId();
-
-// Format file sizes
 formatFileSize(1024); // "1 KB"
-
-// Get filename from path
 getFileName('/path/to/file.txt'); // "file.txt"
 ```
 
@@ -199,10 +207,7 @@ function Editor({ content, onChange, theme }: Props) {
         theme
       });
     }
-
-    return () => {
-      editorRef.current?.destroy();
-    };
+    return () => { editorRef.current?.destroy(); };
   }, []);
 
   return <div ref={containerRef} style={{ height: '100%' }} />;
@@ -224,26 +229,33 @@ function Editor({ content, onChange, theme }: Props) {
   let editor: VeltEditor;
 
   onMount(() => {
-    editor = new VeltEditor({
-      container,
-      content,
-      onChange,
-      theme
-    });
+    editor = new VeltEditor({ container, content, onChange, theme });
   });
 
-  onDestroy(() => {
-    editor?.destroy();
-  });
+  onDestroy(() => { editor?.destroy(); });
 </script>
 
 <div bind:this={container} style="height: 100%;"></div>
 ```
 
-## License
+## Project Structure
 
-MIT License - see [LICENSE](LICENSE) for details.
+```
+velt-core/
+├── src/
+│   ├── editor/             # VeltEditor core
+│   ├── tabs/               # TabManager
+│   ├── languages/          # Language definitions
+│   ├── themes/             # Theme types and helpers
+│   └── utils/              # Shared utilities
+├── dist/                   # Compiled output
+└── package.json
+```
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request on [GitHub](https://github.com/Altagen/Velt-Core).
+Issues and bug reports are welcome on [GitHub](https://github.com/Altagen/Velt-Core/issues).
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.

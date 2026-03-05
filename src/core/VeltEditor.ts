@@ -1,4 +1,4 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Panel, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, highlightWhitespace, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, Decoration, DecorationSet, gutter, GutterMarker } from '@codemirror/view';
 import { EditorState, Extension, Compartment, Prec, StateField, StateEffect, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { search, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext as cmFindNext, findPrevious as cmFindPrevious, replaceNext, replaceAll as cmReplaceAll, getSearchQuery } from '@codemirror/search';
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
