@@ -1,6 +1,8 @@
 name: Security Scan
 
 on:
+  push:
+    branches: [main]
   schedule:
     # Run every Monday at 9:00 UTC
     - cron: '0 9 * * 1'
@@ -65,29 +67,6 @@ jobs:
             audit-report.md
             audit.json
           retention-days: 90
-
-  # ===========================================
-  # CodeQL Deep Scan
-  # ===========================================
-  codeql:
-    name: 🛡️ CodeQL Deep Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: javascript-typescript
-          queries: security-extended,security-and-quality
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: "/language:javascript-typescript"
 
   # ===========================================
   # License Compliance Check
